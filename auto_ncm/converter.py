@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TIT2, TPE1
+from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TIT2, TPE1, TPE2
 from mutagen.mp3 import MP3
 
 from .config import Config
@@ -36,7 +36,7 @@ class ConvertResult:
     dst: Path
     fmt: str  # 输出格式
     title: str
-    artists: str
+    artists: str  # 给 UI 日志展示用，多个艺术家以 "; " 拼接
 
 
 # ---------------------------------------------------------------------------
@@ -60,21 +60,31 @@ def _ffmpeg_path() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _meta_text(meta: dict) -> tuple[str, str]:
-    """从 NCM meta JSON 中提取 ``(title, artists)``。"""
+def _meta_text(meta: dict) -> tuple[str, list[str]]:
+    """从 NCM meta JSON 中提取 ``(title, artists)``。
+
+    artists 返回**列表**而不是拼接好的字符串，以便后续按
+    ID3v2.4 多值或 Vorbis 多字段写入，避免艺人名里含 ``/`` 时被误切
+    （例如 ``Au/Ra``、``AC/DC``）。
+    """
     title = (meta.get("musicName") or "").strip()
     raw_artists = meta.get("artist") or []
+    names: list[str] = []
     if isinstance(raw_artists, list):
-        names = []
         for a in raw_artists:
             if isinstance(a, (list, tuple)) and a:
-                names.append(str(a[0]))
+                name = str(a[0]).strip()
             elif isinstance(a, str):
-                names.append(a)
-        artists = "/".join(filter(None, names))
-    else:
-        artists = str(raw_artists)
-    return title, artists
+                name = a.strip()
+            else:
+                name = ""
+            if name:
+                names.append(name)
+    elif isinstance(raw_artists, str):
+        s = raw_artists.strip()
+        if s:
+            names.append(s)
+    return title, names
 
 
 def _safe_filename(name: str) -> str:
@@ -91,10 +101,25 @@ def _embed_mp3_tags(path: Path, result: NcmResult) -> None:
         tags = ID3(path)
     except ID3NoHeaderError:
         tags = ID3()
+    # 如果 ffmpeg 之前写的是 ID3v2.3, mutagen 加载后 tags.version=(2,3,0),
+    # 单纯调 save(v2_version=4) 不会真的把 header 升级上去 (实测 mutagen 1.47
+    # 仍然写出 v2.3 头部, 只是帧体按 v2.4 风格用 NUL 分隔多值, Windows Shell
+    # 会按 v2.3 规则把 NUL 当成普通字符显示, 看到 "Au; Ra" 这种错误切分)。
+    # 这里显式升级到 v2.4, 保证 header 与多值语义一致。
+    try:
+        tags.update_to_v24()
+    except Exception:  # noqa: BLE001
+        pass
     if title:
         tags.add(TIT2(encoding=3, text=title))
     if artists:
-        tags.add(TPE1(encoding=3, text=artists))
+        # ID3v2.4 允许多值帧, mutagen 会按 NUL 分隔写入;
+        # mp3tag、Picard、foobar2000、Windows Shell 都能正确切分成多个艺术家,
+        # 即使艺人名字里带 "/" (Au/Ra、AC/DC) 也不会被误切。
+        tags.add(TPE1(encoding=3, text=list(artists)))
+        # 显式写专辑艺术家, 避免播放器/Picard 看不到该字段;
+        # NCM 元数据里没有独立的 albumArtist, 按惯例直接复用演唱者列表。
+        tags.add(TPE2(encoding=3, text=list(artists)))
     if album:
         tags.add(TALB(encoding=3, text=album))
     if result.cover:
@@ -107,7 +132,8 @@ def _embed_mp3_tags(path: Path, result: NcmResult) -> None:
                 data=result.cover,
             )
         )
-    tags.save(path)
+    # 强制按 ID3v2.4 写入, 让多值用 NUL 分隔的特性生效
+    tags.save(path, v2_version=4)
 
 
 def _embed_flac_tags(path: Path, result: NcmResult) -> None:
@@ -117,7 +143,10 @@ def _embed_flac_tags(path: Path, result: NcmResult) -> None:
     if title:
         audio["title"] = title
     if artists:
-        audio["artist"] = artists
+        # Vorbis Comment 原生支持同名标签出现多次，
+        # 传 list 给 mutagen 即会写多个 ARTIST/ALBUMARTIST 字段。
+        audio["artist"] = list(artists)
+        audio["albumartist"] = list(artists)
     if album:
         audio["album"] = album
     if result.cover:
@@ -191,8 +220,9 @@ def _flac_to_mp3(flac_path: Path, mp3_path: Path, bitrate: str) -> None:
         bitrate,
         "-map_metadata",
         "0",
+        # 写 ID3v2.4, 之后 mutagen 补写多值 TPE1/TPE2 时才能用 NUL 分隔。
         "-id3v2_version",
-        "3",
+        "4",
         str(mp3_path),
     ]
     logger.debug("ffmpeg cmd: %s", cmd)
@@ -261,7 +291,7 @@ def convert_one(path: str | os.PathLike, cfg: Config) -> ConvertResult:
         dst=final_path,
         fmt=final_ext,
         title=title or src.stem,
-        artists=artists,
+        artists="; ".join(artists),
     )
 
 
