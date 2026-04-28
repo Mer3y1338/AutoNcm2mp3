@@ -1,4 +1,4 @@
-# AutoNcm2Mp3 by https://blog.mer3y.xyz/#about
+# AutoNcm2Mp3 by https://blog.mer3y.xyz
 
 > 配置好网易云下载路径，下载完成后自动把 `.ncm` 转成 `.mp3` / `.flac`，
 > 轻量、绿色、开箱即用。
