@@ -98,7 +98,41 @@ def _set_app_user_model_id() -> None:
         pass
 
 
+def _show_already_running_dialog() -> None:
+    """提示用户已经有实例在运行 (用 Win32 MessageBox, 无需 Tk)。"""
+    if sys.platform != "win32":
+        print("AutoNcm2Mp3 已经在运行。", file=sys.stderr)
+        return
+    try:
+        import ctypes
+
+        MB_OK = 0x00000000
+        MB_ICONINFORMATION = 0x00000040
+        MB_TOPMOST = 0x00040000
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "AutoNcm2Mp3 已经在运行。\n已为您打开主窗口。",
+            "AutoNcm2Mp3",
+            MB_OK | MB_ICONINFORMATION | MB_TOPMOST,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _gui(force_minimized: bool = False) -> int:
+    # ---- 单实例锁: 必须在任何重型初始化之前 ----
+    from .single_instance import SingleInstanceLock
+
+    lock = SingleInstanceLock()
+    if lock.already_running:
+        # 让已有实例显示主窗口, 然后我们退出
+        ok = lock.signal_existing()
+        if not ok:
+            # 兜底: 找不到信号窗口也提示一下
+            logging.getLogger(__name__).warning("未能联系到已有实例")
+        _show_already_running_dialog()
+        return 0
+
     cfg = Config.load()
     # 同步注册表状态 (路径变化时自动更新启动项)
     try:
@@ -116,7 +150,10 @@ def _gui(force_minimized: bool = False) -> int:
 
     # start_minimized: 用户偏好 OR 命令行 --minimized 强制
     start_minimized = bool(cfg.start_minimized) or force_minimized
-    TrayApp(cfg, watcher, start_minimized=start_minimized).run()
+    try:
+        TrayApp(cfg, watcher, start_minimized=start_minimized).run()
+    finally:
+        lock.release()
     return 0
 
 

@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 from .config import Config
 from .gui import App
 from .resources import LOGO_PNG
+from .single_instance import install_signal_window
 from .watcher import NcmWatcher
 
 logger = logging.getLogger(__name__)
@@ -131,8 +132,20 @@ class TrayApp:
     # 启动
     # ------------------------------------------------------------------
 
+    def _on_external_activate(self) -> None:
+        """收到第二个实例的激活请求 (来自单实例信号窗口的子线程)。
+
+        必须 marshal 到 Tk 主线程, 不能直接操作 Tk 控件。
+        """
+        try:
+            self.app.root.after(0, self.app.show)
+        except Exception:  # noqa: BLE001
+            logger.exception("激活主窗口失败")
+
     def run(self) -> None:
         self._start_icon()
+        # 安装单实例激活信号窗口
+        signal_win = install_signal_window(self._on_external_activate)
         if self.cfg.watch_enabled:
             self.watcher.start()
         if self._start_minimized:
@@ -141,6 +154,10 @@ class TrayApp:
             self.app.run_mainloop()
         finally:
             self._stopping = True
+            try:
+                signal_win.stop()
+            except Exception:  # noqa: BLE001
+                pass
             self.watcher.shutdown()
             if self._icon:
                 self._icon.stop()
