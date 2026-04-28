@@ -1,0 +1,10 @@
+# 运行依赖
+pycryptodome>=3.20.0   # AES 解密
+mutagen>=1.47.0        # 写入 ID3 / FLAC 标签
+watchdog>=4.0.0        # 监控下载目录
+send2trash>=1.8.3      # 转换成功后把原 NCM 移到回收站
+pystray>=0.19.5        # 系统托盘
+Pillow>=10.0.0         # 托盘图标 (pystray 需要)
+
+# 打包 (可选)
+# pyinstaller>=6.0.0
