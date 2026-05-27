@@ -1,4 +1,4 @@
-# AutoNcm2Mp3 by https://blog.mer3y.xyz 视频教程:https://www.bilibili.com/video/BV1nS96BSEGa
+# AutoNcm2Mp3 by https://blog.mer3y.xyz 视频教程:BV1nS96BSEGa
 
 > 配置好网易云下载路径，下载完成后自动把 `.ncm` 转成 `.mp3` / `.flac`，
 > 轻量、绿色、开箱即用。
@@ -127,3 +127,5 @@ AutoNcm2mp3/
 ## License
 
 MIT
+
+【感谢Linux.do社区及GitHub社区各位开发者对项目的支持与贡献】
